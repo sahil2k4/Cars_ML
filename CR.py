@@ -1,5 +1,3 @@
-# Streamlit app for car price prediction
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,65 +6,69 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 import plotly.express as px
 
-# Load Data
-@st.cache_data
-def load_data():
-    df = pd.read_csv("CARS.csv")  # Make sure this CSV is in the same folder
-    return df
-
-df = load_data()
-
-# Title
+# App Title
+st.set_page_config(page_title="Car Price Prediction", layout="wide")
 st.title("🚗 Car Price Prediction App")
 
-# Show Data
-if st.checkbox("Show Raw Dataset"):
-    st.write(df)
+# File Uploader
+uploaded_file = st.file_uploader("📂 Upload your CARS.csv file", type=["csv"])
 
-# Preprocessing
-df = df.dropna()
-label_encoders = {}
-categorical_cols = df.select_dtypes(include='object').columns
+if uploaded_file is not None:
+    # Load Data
+    df = pd.read_csv(uploaded_file)
+    st.success("File uploaded successfully!")
 
-for col in categorical_cols:
-    le = LabelEncoder()
-    df[col] = le.fit_transform(df[col])
-    label_encoders[col] = le
+    # Show raw data
+    if st.checkbox("Show Raw Dataset"):
+        st.dataframe(df)
 
-# Features and Target
-X = df.drop("Price", axis=1)
-y = df["Price"]
+    # Drop missing values
+    df.dropna(inplace=True)
 
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Encode categorical columns
+    label_encoders = {}
+    categorical_cols = df.select_dtypes(include="object").columns
 
-# Train model
-model = RandomForestRegressor()
-model.fit(X_train, y_train)
+    for col in categorical_cols:
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col])
+        label_encoders[col] = le
 
-# User Input
-st.sidebar.header("📥 Input Car Features")
-user_input = {}
+    # Split data
+    X = df.drop("Price", axis=1)
+    y = df["Price"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-for col in X.columns:
-    if col in categorical_cols:
-        options = label_encoders[col].classes_
-        selected = st.sidebar.selectbox(f"{col}", options)
-        encoded = label_encoders[col].transform([selected])[0]
-        user_input[col] = encoded
-    else:
-        value = st.sidebar.number_input(f"{col}", float(df[col].min()), float(df[col].max()), float(df[col].mean()))
-        user_input[col] = value
+    # Train model
+    model = RandomForestRegressor()
+    model.fit(X_train, y_train)
 
-input_df = pd.DataFrame([user_input])
+    # Sidebar for user input
+    st.sidebar.header("📥 Input Car Features")
+    input_data = {}
 
-# Predict
-if st.button("Predict Price"):
-    prediction = model.predict(input_df)[0]
-    st.success(f"💰 Predicted Car Price: ${prediction:,.2f}")
+    for col in X.columns:
+        if col in categorical_cols:
+            options = label_encoders[col].classes_
+            selected = st.sidebar.selectbox(f"{col}", options)
+            input_data[col] = label_encoders[col].transform([selected])[0]
+        else:
+            min_val = float(df[col].min())
+            max_val = float(df[col].max())
+            mean_val = float(df[col].mean())
+            input_data[col] = st.sidebar.slider(f"{col}", min_val, max_val, mean_val)
 
-# Visualization
-st.subheader("🔍 Price Distribution by Car Company")
-if "Company" in df.columns:
-    fig = px.box(df, x="Company", y="Price", title="Car Price Distribution by Company")
-    st.plotly_chart(fig)
+    # Predict Price
+    input_df = pd.DataFrame([input_data])
+    if st.button("🔮 Predict Car Price"):
+        prediction = model.predict(input_df)[0]
+        st.success(f"💰 Estimated Car Price: ${prediction:,.2f}")
+
+    # Visualization
+    st.subheader("📊 Car Price Distribution by Company")
+    if "Company" in df.columns:
+        fig = px.box(df, x="Company", y="Price", title="Car Price by Company")
+        st.plotly_chart(fig, use_container_width=True)
+
+else:
+    st.info("Please upload a CARS.csv file to start.")
