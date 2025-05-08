@@ -1,109 +1,72 @@
+# Streamlit app for car price prediction
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
-from sklearn.linear_model import LinearRegression
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.metrics import r2_score, mean_squared_error
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
+import plotly.express as px
 
-st.set_page_config(layout="wide")
-st.title("🚗 Car Price Prediction - Model Performance Visualizer")
+# Load Data
+@st.cache_data
+def load_data():
+    df = pd.read_csv("CARS.csv")  # Make sure this CSV is in the same folder
+    return df
 
-# Load and preprocess data
-df = pd.read_csv("DataSets/CARS.csv")
-df.dropna(subset=["Cylinders"], inplace=True)
+df = load_data()
 
-df["MSRP"] = df["MSRP"].replace("[$,]", "", regex=True).astype(int)
-df["Invoice"] = df["Invoice"].replace("[$,]", "", regex=True).astype(int)
+# Title
+st.title("🚗 Car Price Prediction App")
 
-label = LabelEncoder()
-for col in ["Make", "Model", "Type", "Origin", "DriveTrain"]:
-    df[col] = label.fit_transform(df[col])
+# Show Data
+if st.checkbox("Show Raw Dataset"):
+    st.write(df)
 
-X = df.drop("MSRP", axis=1)
-y = df["MSRP"]
+# Preprocessing
+df = df.dropna()
+label_encoders = {}
+categorical_cols = df.select_dtypes(include='object').columns
 
-x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+for col in categorical_cols:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col])
+    label_encoders[col] = le
 
-# Define models
-models = {
-    "Linear Regression": LinearRegression(),
-    "Decision Tree": DecisionTreeRegressor(random_state=42),
-    "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
-    "Gradient Boosting": GradientBoostingRegressor(n_estimators=100, random_state=42)
-}
+# Features and Target
+X = df.drop("Price", axis=1)
+y = df["Price"]
 
-# Train and predict
-results = {}
-for name, model in models.items():
-    model.fit(x_train, y_train)
-    y_pred = model.predict(x_test)
-    results[name] = {
-        "y_pred": y_pred,
-        "r2": r2_score(y_test, y_pred),
-        "rmse": mean_squared_error(y_test, y_pred, squared=False)
-    }
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Create subplots for comparison
-actual = pd.Series(y_test).reset_index(drop=True)
+# Train model
+model = RandomForestRegressor()
+model.fit(X_train, y_train)
 
-fig = make_subplots(
-    rows=2, cols=2,
-    subplot_titles=list(results.keys()),
-    shared_xaxes=True, shared_yaxes=True
-)
+# User Input
+st.sidebar.header("📥 Input Car Features")
+user_input = {}
 
-model_colors = {
-    "Linear Regression": "red",
-    "Random Forest": "green",
-    "Decision Tree": "orange",
-    "Gradient Boosting": "purple"
-}
+for col in X.columns:
+    if col in categorical_cols:
+        options = label_encoders[col].classes_
+        selected = st.sidebar.selectbox(f"{col}", options)
+        encoded = label_encoders[col].transform([selected])[0]
+        user_input[col] = encoded
+    else:
+        value = st.sidebar.number_input(f"{col}", float(df[col].min()), float(df[col].max()), float(df[col].mean()))
+        user_input[col] = value
 
-positions = [(1, 1), (1, 2), (2, 1), (2, 2)]
+input_df = pd.DataFrame([user_input])
 
-for (name, res), (row, col) in zip(results.items(), positions):
-    fig.add_trace(go.Scatter(
-        y=actual,
-        mode='lines+markers',
-        name=f"{name} - Actual" if (row, col) == (1, 1) else "",
-        line=dict(color="blue")
-    ), row=row, col=col)
+# Predict
+if st.button("Predict Price"):
+    prediction = model.predict(input_df)[0]
+    st.success(f"💰 Predicted Car Price: ${prediction:,.2f}")
 
-    fig.add_trace(go.Scatter(
-        y=res["y_pred"],
-        mode='lines+markers',
-        name=f"{name} - Predicted" if (row, col) == (1, 1) else "",
-        line=dict(color=model_colors[name])
-    ), row=row, col=col)
-
-fig.update_layout(
-    title="📊 Actual vs Predicted — All Models",
-    height=900,
-    width=1100,
-    showlegend=True
-)
-
-fig.update_xaxes(title_text="Test Sample Index")
-fig.update_yaxes(title_text="Target Value")
-
-st.plotly_chart(fig, use_container_width=True)
-
-# Display R² and RMSE Table
-metrics_data = {
-    "Model": [],
-    "R² Score": [],
-    "RMSE": []
-}
-for name, res in results.items():
-    metrics_data["Model"].append(name)
-    metrics_data["R² Score"].append(round(res["r2"], 4))
-    metrics_data["RMSE"].append(round(res["rmse"], 2))
-
-metrics_df = pd.DataFrame(metrics_data)
-st.subheader("📈 Model Evaluation Metrics")
-st.dataframe(metrics_df, use_container_width=True)
+# Visualization
+st.subheader("🔍 Price Distribution by Car Company")
+if "Company" in df.columns:
+    fig = px.box(df, x="Company", y="Price", title="Car Price Distribution by Company")
+    st.plotly_chart(fig)
