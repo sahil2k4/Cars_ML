@@ -1,74 +1,77 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import mean_squared_error
+import plotly.express as px
 
-# Set page config
-st.set_page_config(page_title="Car Price Predictor", layout="wide", initial_sidebar_state="expanded")
-
+st.set_page_config(page_title="Car Price Predictor", layout="wide")
 st.title("🚗 Car Price Prediction App")
 
-# Upload CSV file
-uploaded_file = st.file_uploader("Upload your car dataset CSV file", type=["csv"])
+uploaded_file = st.file_uploader("📂 Upload your CARS dataset (CSV format)", type=["csv"])
+
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
+    st.success("File uploaded and loaded!")
 
-    st.subheader("Dataset Preview")
-    st.dataframe(df.head())
+    st.subheader("🧾 Available Columns")
+    st.write(df.columns.tolist())
 
-    if "Price" not in df.columns:
-        st.error("Column 'Price' not found. Please upload a dataset with a 'Price' column.")
-        st.stop()
+    # Ask user to select the target (price) column
+    target_column = st.selectbox("🎯 Select the Price Column (Target)", df.columns)
+
+    # Show raw data
+    if st.checkbox("🔍 Show Raw Data"):
+        st.dataframe(df)
+
+    # Drop rows with missing values
+    df.dropna(inplace=True)
 
     # Encode categorical columns
-    df_encoded = df.copy()
-    for col in df_encoded.select_dtypes(include="object").columns:
+    label_encoders = {}
+    categorical_cols = df.select_dtypes(include="object").columns
+
+    for col in categorical_cols:
         le = LabelEncoder()
-        df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
+        df[col] = le.fit_transform(df[col])
+        label_encoders[col] = le
 
-    # Plotly histogram
-    st.subheader("📊 Distribution of Car Prices")
-    fig = px.histogram(df, x="Price", nbins=50, title="Distribution of Car Prices",
-                       labels={"Price": "Car Price"}, color_discrete_sequence=['skyblue'])
-    fig.update_layout(template="plotly_dark")
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Split data
-    X = df_encoded.drop("Price", axis=1)
-    y = df_encoded["Price"]
+    # Split features and target
+    try:
+        X = df.drop(target_column, axis=1)
+        y = df[target_column]
+    except KeyError:
+        st.error(f"❌ The selected column '{target_column}' does not exist. Please re-upload your data.")
+        st.stop()
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Train model
     model = RandomForestRegressor()
     model.fit(X_train, y_train)
 
-    # Predict and evaluate
-    y_pred = model.predict(X_test)
-    rmse = mean_squared_error(y_test, y_pred, squared=False)
-
-    st.subheader("📈 Model Performance")
-    st.write(f"Root Mean Squared Error: **{rmse:.2f}**")
-
-    # Make prediction using user input
-    st.subheader("🔍 Predict Car Price")
+    st.sidebar.header("📥 Input Car Features")
     input_data = {}
+
     for col in X.columns:
-        if df[col].dtype == "object":
-            input_data[col] = st.selectbox(f"Select {col}", sorted(df[col].unique()))
+        if col in categorical_cols:
+            options = label_encoders[col].classes_
+            selected = st.sidebar.selectbox(f"{col}", options)
+            input_data[col] = label_encoders[col].transform([selected])[0]
         else:
-            input_data[col] = st.number_input(f"Enter {col}", value=float(df[col].mean()))
+            min_val = float(df[col].min())
+            max_val = float(df[col].max())
+            mean_val = float(df[col].mean())
+            input_data[col] = st.sidebar.slider(f"{col}", min_val, max_val, mean_val)
 
-    # Prepare input
     input_df = pd.DataFrame([input_data])
-    for col in input_df.select_dtypes(include="object").columns:
-        input_df[col] = le.fit_transform(input_df[col].astype(str))
+    if st.button("🔮 Predict Car Price"):
+        prediction = model.predict(input_df)[0]
+        st.success(f"💰 Predicted Car Price: ${prediction:,.2f}")
 
-    prediction = model.predict(input_df)[0]
-    st.success(f"💰 Predicted Car Price: **{prediction:,.2f}**")
+    st.subheader("📊 Price Distribution")
+    fig = px.histogram(df, x=target_column, nbins=30, title="Distribution of Car Prices")
+    st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("Please upload a CSV file to begin.")
+    st.info("Please upload a CARS.csv file to get started.")
