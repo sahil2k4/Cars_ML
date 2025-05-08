@@ -1,29 +1,51 @@
 import streamlit as st
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 import plotly.express as px
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_squared_error
 
-# Example: After prediction is done
-if st.button("Predict Price"):
-    # Assume y_test and y_pred are available from your model
-    st.subheader("🔍 Actual vs Predicted Car Prices")
-    
-    # Combine actual and predicted for plotting
-    result_df = pd.DataFrame({
-        "Actual Price": y_test,
-        "Predicted Price": y_pred
-    }).reset_index(drop=True)
+# Set page configuration
+st.set_page_config(page_title="Car Price Predictor", layout="wide")
 
-    # Plot using Plotly for interactivity
-    fig = px.scatter(result_df, x="Actual Price", y="Predicted Price",
-                     title="Actual vs Predicted Car Prices",
-                     labels={"Actual Price": "Actual", "Predicted Price": "Predicted"},
-                     color_discrete_sequence=["#00cc96"])
-    
-    fig.add_shape(
-        type="line", x0=result_df["Actual Price"].min(), y0=result_df["Actual Price"].min(),
-        x1=result_df["Actual Price"].max(), y1=result_df["Actual Price"].max(),
-        line=dict(color="red", dash="dash")
-    )
-    st.plotly_chart(fig, use_container_width=True)
+st.title("🚗 Car Price Prediction App with Plotly Visualization")
+
+# Upload dataset
+uploaded_file = st.file_uploader("Upload your car dataset CSV file", type=["csv"])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+
+    st.subheader("Dataset Preview")
+    st.dataframe(df.head())
+
+    if "Price" not in df.columns:
+        st.error("Column 'Price' not found. Please upload a dataset with a 'Price' column.")
+        st.stop()
+
+    # Encode categorical columns
+    df_encoded = df.copy()
+    for col in df_encoded.select_dtypes(include="object").columns:
+        le = LabelEncoder()
+        df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
+
+    # Distribution histogram
+    st.subheader("📊 Distribution of Car Prices")
+    fig_hist = px.histogram(df, x="Price", nbins=50, title="Distribution of Car Prices",
+                            labels={"Price": "Car Price"}, color_discrete_sequence=['skyblue'])
+    fig_hist.update_layout(template="plotly_dark")
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    # Split data
+    X = df_encoded.drop("Price", axis=1)
+    y = df_encoded["Price"]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Train model
+    model = RandomForestRegressor()
+    model.fit(X_train, y_train)
+
+    # Predict and evaluate
+    y_pred = model.predict(X_test)
+    rmse
