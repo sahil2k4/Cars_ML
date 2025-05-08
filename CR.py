@@ -6,7 +6,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
 
-# Set page configuration
+# Set up page config
 st.set_page_config(page_title="Car Price Predictor", layout="wide")
 
 st.title("🚗 Car Price Prediction App with Plotly Visualization")
@@ -16,11 +16,15 @@ uploaded_file = st.file_uploader("Upload your car dataset CSV file", type=["csv"
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
 
+    # Rename 'msrp' to 'Price' for consistency
+    if 'msrp' in df.columns:
+        df.rename(columns={'msrp': 'Price'}, inplace=True)
+
     st.subheader("Dataset Preview")
     st.dataframe(df.head())
 
     if "Price" not in df.columns:
-        st.error("Column 'Price' not found. Please upload a dataset with a 'Price' column.")
+        st.error("Column 'Price' not found. Please upload a dataset with a 'msrp' or 'Price' column.")
         st.stop()
 
     # Encode categorical columns
@@ -29,7 +33,7 @@ if uploaded_file is not None:
         le = LabelEncoder()
         df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
 
-    # Distribution histogram
+    # Plot distribution
     st.subheader("📊 Distribution of Car Prices")
     fig_hist = px.histogram(df, x="Price", nbins=50, title="Distribution of Car Prices",
                             labels={"Price": "Car Price"}, color_discrete_sequence=['skyblue'])
@@ -46,6 +50,37 @@ if uploaded_file is not None:
     model = RandomForestRegressor()
     model.fit(X_train, y_train)
 
-    # Predict and evaluate
+    # Predictions
     y_pred = model.predict(X_test)
-    rmse
+    rmse = mean_squared_error(y_test, y_pred, squared=False)
+
+    st.subheader("📈 Model Performance")
+    st.write(f"Root Mean Squared Error: **{rmse:.2f}**")
+
+    # Line plot for actual vs predicted
+    st.subheader("📉 Actual vs Predicted Car Prices")
+    result_df = pd.DataFrame({"Actual": y_test.values, "Predicted": y_pred})
+    result_df = result_df.reset_index(drop=True)
+    fig_line = px.line(result_df, title="Actual vs Predicted Car Prices", markers=True)
+    fig_line.update_layout(template="plotly_dark")
+    st.plotly_chart(fig_line, use_container_width=True)
+
+    # User input for prediction
+    st.subheader("🔍 Predict Car Price")
+    input_data = {}
+    for col in X.columns:
+        if df[col].dtype == "object":
+            input_data[col] = st.selectbox(f"Select {col}", sorted(df[col].unique()))
+        else:
+            input_data[col] = st.number_input(f"Enter {col}", value=float(df[col].mean()))
+
+    input_df = pd.DataFrame([input_data])
+    for col in input_df.select_dtypes(include="object").columns:
+        input_df[col] = le.fit_transform(input_df[col].astype(str))
+
+    predicted_price = model.predict(input_df)[0]
+    st.success(f"💰 Predicted Car Price: **{predicted_price:,.2f}**")
+
+else:
+    st.info("Please upload a CSV file to begin.")
+
