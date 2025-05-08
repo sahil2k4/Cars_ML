@@ -1,77 +1,99 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
+import warnings
 from sklearn.preprocessing import LabelEncoder
-import plotly.express as px
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from sklearn.metrics import r2_score, mean_squared_error
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Car Price Predictor", layout="wide")
-st.title("🚗 Car Price Prediction App")
+# Streamlit config
+st.set_page_config(page_title="Car Price Prediction", layout="wide")
+st.title("🚗 Car Price Prediction — Ridge, Lasso, ElasticNet")
 
-uploaded_file = st.file_uploader("📂 Upload your CARS dataset (CSV format)", type=["csv"])
+# Ignore warnings
+warnings.filterwarnings('ignore')
+pd.set_option('display.max_columns', 500)
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.success("File uploaded and loaded!")
+# Load the data
+df = pd.read_csv('../DataSets/CARS.csv')
+st.subheader("Data Preview")
+st.dataframe(df.head())
 
-    st.subheader("🧾 Available Columns")
-    st.write(df.columns.tolist())
+# Handle missing values
+missing_cyl = df["Cylinders"].isnull().sum()
+st.write(f"🔍 Missing values in 'Cylinders': {missing_cyl}")
+df = df.dropna(subset=["Cylinders"])
 
-    # Ask user to select the target (price) column
-    target_column = st.selectbox("🎯 Select the Price Column (Target)", df.columns)
+# Convert currency columns
+df["MSRP"] = df["MSRP"].replace("[$,]", "", regex=True).astype("int64")
+df["Invoice"] = df["Invoice"].replace("[$,]", "", regex=True).astype("int64")
 
-    # Show raw data
-    if st.checkbox("🔍 Show Raw Data"):
-        st.dataframe(df)
+# Save original data for display
+df_display = df.copy()
 
-    # Drop rows with missing values
-    df.dropna(inplace=True)
+# Encode categorical columns for modeling
+df_model = df.copy()
+label = LabelEncoder()
+categorical_cols = ["Make", "Model", "Type", "Origin", "DriveTrain"]
+for col in categorical_cols:
+    df_model[col] = label.fit_transform(df_model[col])
 
-    # Encode categorical columns
-    label_encoders = {}
-    categorical_cols = df.select_dtypes(include="object").columns
+# Prepare features and target
+X = df_model.drop("MSRP", axis=1)
+y = df_model["MSRP"]
 
-    for col in categorical_cols:
-        le = LabelEncoder()
-        df[col] = le.fit_transform(df[col])
-        label_encoders[col] = le
+# Train-test split
+x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Split features and target
-    try:
-        X = df.drop(target_column, axis=1)
-        y = df[target_column]
-    except KeyError:
-        st.error(f"❌ The selected column '{target_column}' does not exist. Please re-upload your data.")
-        st.stop()
+# Define models and hyperparameters
+ridge_params = {'alpha': [0.01, 0.1, 1, 10, 100]}
+lasso_params = {'alpha': [0.01, 0.1, 1, 10, 100]}
+elastic_params = {'alpha': [0.01, 0.1, 1, 10], 'l1_ratio': [0.1, 0.5, 0.9]}
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+models = {
+    "Ridge": GridSearchCV(Ridge(), ridge_params, cv=5, scoring='r2'),
+    "Lasso": GridSearchCV(Lasso(max_iter=10000), lasso_params, cv=5, scoring='r2'),
+    "ElasticNet": GridSearchCV(ElasticNet(max_iter=10000), elastic_params, cv=5, scoring='r2')
+}
 
-    model = RandomForestRegressor()
-    model.fit(X_train, y_train)
+# Train and evaluate models
+results = {}
+predictions = {}
 
-    st.sidebar.header("📥 Input Car Features")
-    input_data = {}
+for name, model in models.items():
+    model.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+    predictions[name] = y_pred
+    results[name] = {
+        "Best Params": model.best_params_,
+        "R² Score": round(r2_score(y_test, y_pred), 4),
+        "RMSE": round(mean_squared_error(y_test, y_pred, squared=False), 2)
+    }
 
-    for col in X.columns:
-        if col in categorical_cols:
-            options = label_encoders[col].classes_
-            selected = st.sidebar.selectbox(f"{col}", options)
-            input_data[col] = label_encoders[col].transform([selected])[0]
-        else:
-            min_val = float(df[col].min())
-            max_val = float(df[col].max())
-            mean_val = float(df[col].mean())
-            input_data[col] = st.sidebar.slider(f"{col}", min_val, max_val, mean_val)
+# Display results
+st.subheader("📊 Model Results")
+st.dataframe(pd.DataFrame(results).T)
 
-    input_df = pd.DataFrame([input_data])
-    if st.button("🔮 Predict Car Price"):
-        prediction = model.predict(input_df)[0]
-        st.success(f"💰 Predicted Car Price: ${prediction:,.2f}")
+# Plot: Actual vs Predicted
+st.subheader("📈 Actual vs Predicted Comparison")
 
-    st.subheader("📊 Price Distribution")
-    fig = px.histogram(df, x=target_column, nbins=30, title="Distribution of Car Prices")
-    st.plotly_chart(fig, use_container_width=True)
+fig = make_subplots(rows=1, cols=3, subplot_titles=list(predictions.keys()), shared_yaxes=True)
 
-else:
-    st.info("Please upload a CARS.csv file to get started.")
+for i, (name, y_pred) in enumerate(predictions.items(), start=1):
+    fig.add_trace(go.Scatter(x=list(range(len(y_test))), y=y_test, mode='lines+markers',
+                             name='Actual', line=dict(color='blue'), showlegend=(i == 1)),
+                  row=1, col=i)
+
+    fig.add_trace(go.Scatter(x=list(range(len(y_pred))), y=y_pred, mode='lines+markers',
+                             name='Predicted', line=dict(color='red'), showlegend=(i == 1)),
+                  row=1, col=i)
+
+fig.update_layout(height=500, width=1200, title_text="Model Predictions vs Actual Values")
+st.plotly_chart(fig)
+
+# Save cleaned file
+df_display.to_csv("carscsv.csv", index=False)
+st.success("✅ Processed file saved as `carscsv.csv`")
